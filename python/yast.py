@@ -13,6 +13,11 @@
 # Version:
 # 0.8 - First release
 #
+# 0.9 - Bugfixes
+#  * Fixed issue with optional params not working properly for many commands
+#  * Renamed --phoneNumber to --phone-number
+#  * Added option for connecting to Yast using HTTPS
+#
 
 import argparse, time, re, datetime, io, sys
 
@@ -47,6 +52,7 @@ class YastCli(object):
     self.yast = self._createYast()
     self.yast.propagateExceptions = True
     self.yast.host = self.args.host;
+    self.yast.useHttps = self.args.https;
 
     # Execute command
     try:
@@ -82,6 +88,10 @@ class YastCli(object):
                            help="Disable sorting of output")
     p['pars'].add_argument('-s', '--silent', dest='silent', action='store_true', default=False,
                            help="Remove unnecessary output")
+    p['pars'].add_argument('--http', dest='https', action='store_false', default=False,
+                           help="Connect using http. Default")
+    p['pars'].add_argument('--https', dest='https', action='store_true', default=False,
+                           help="Connect using https")
     p['pars'].add_argument('-v', '--version', action='version', version="Yast Python CLI 0.8")
     p['pars'].add_argument('-a', '--all-info', dest='all_info', action='store_true', default=False,
                            help="Show all info about printed objects")
@@ -128,13 +138,13 @@ class YastCli(object):
     p['subAdd'] = p['parsAdd'].add_subparsers()
 
     # Record id arguments. When specified, id is never optional and always positional
-    p['argsRecordId'] = argparse.ArgumentParser(add_help=False)
+    p['argsRecordId'] = argparse.ArgumentParser(add_help=False, argument_default=argparse.SUPPRESS)
     p['argsRecordId'].add_argument('id', help="Id of record")
 
     # Arguments for generic records
-    p['argsRecordData'] = argparse.ArgumentParser(add_help=False)
+    p['argsRecordData'] = argparse.ArgumentParser(add_help=False, argument_default=argparse.SUPPRESS)
     p['argsRecordData'].add_argument('project', nargs='?', help="Id or name of parent project")
-    p['argsRecordData'].add_argument('--project', help="Id or name of parent project")
+    p['argsRecordData'].add_argument('--project', dest='project', help="Id or name of parent project")
     p['argsRecordData'].add_argument('startTime', nargs='?', help="Start time of record. See 'print time' command for help")
     p['argsRecordData'].add_argument('--start-time', '--from', dest='startTime', help="Start time of record. See 'print time' command for help")
     p['argsRecordData'].add_argument('endTime', nargs='?', help="End time of record. See 'print time' command for help")
@@ -147,28 +157,29 @@ class YastCli(object):
                                      help="Record is not running")
 
     # Arguments for phonecall records [additional]
-    p['argsRecordDataPhonecall'] = argparse.ArgumentParser(add_help=False)
+    p['argsRecordDataPhonecall'] = argparse.ArgumentParser(add_help=False, argument_default=argparse.SUPPRESS)
     p['argsRecordDataPhonecall'].add_argument('phoneNumber', nargs='?', help="Phonenumber for phonecall")
-    p['argsRecordDataPhonecall'].add_argument('--phoneNumber', help="Phonenumber for phonecall")
+    p['argsRecordDataPhonecall'].add_argument('--phone-number', dest='phoneNumber', help="Phonenumber for phonecall")
     p['argsRecordDataPhonecall'].add_argument('-o', '--outgoing', dest='outgoing', action='store_true',
                                          help="Phonecall is outgoing [default]")
     p['argsRecordDataPhonecall'].add_argument('--incoming', dest='outgoing', action='store_false',
                                          help="Phonecall is incoming")
 
     # Project/folder id arguments. When specified, id is never optional and always positional
-    p['argsProjectId'] = argparse.ArgumentParser(add_help=False)
+    p['argsProjectId'] = argparse.ArgumentParser(add_help=False, argument_default=argparse.SUPPRESS)
     p['argsProjectId'].add_argument('id', help="Id/name of item to remove")
 
     # Arguments for projects/folders
-    p['argsProjectData'] = argparse.ArgumentParser(add_help=False)
+    p['argsProjectData'] = argparse.ArgumentParser(add_help=False, argument_default=argparse.SUPPRESS)
     p['argsProjectData'].add_argument('name', nargs='?', help="Name of new one")
-    p['argsProjectData'].add_argument('--name', help="Name of new one")
+    p['argsProjectData'].add_argument('--name', dest='name', help="Name of new one")
     p['argsProjectData'].add_argument('description', nargs='?', help="Description")
-    p['argsProjectData'].add_argument('--description', help="Description")
+    p['argsProjectData'].add_argument('--description', dest='description', help="Description")
     p['argsProjectData'].add_argument('color', nargs='?', help="Color as shown in web interface")
-    p['argsProjectData'].add_argument('--color', help="Color as shown in web interface")
+    p['argsProjectData'].add_argument('--color', dest='color', help="Color as shown in web interface")
     p['argsProjectData'].add_argument('parent', nargs='?', help="Folder to put it in. Default is no folder")
-    p['argsProjectData'].add_argument('--parent', help="Folder to put it in. Default is no folder.  See 'print parent-id' command for help")
+    p['argsProjectData'].add_argument('--parent', dest='parent',
+                                      help="Folder to put it in. Default is no folder.  See 'print parent-id' command for help")
     
     
     # add record command
@@ -263,7 +274,7 @@ class YastCli(object):
     p['subGet'] = p['parsGet'].add_subparsers()
 
     # Arguments for record queries
-    p['argsQueryRecords'] = argparse.ArgumentParser(add_help=False)
+    p['argsQueryRecords'] = argparse.ArgumentParser(add_help=False, argument_default=argparse.SUPPRESS)
     p['argsQueryRecords'].add_argument('-f', '--from', dest='timeFrom', metavar="TF", help="Get records starting from this time")
     p['argsQueryRecords'].add_argument('-t', '--to', dest='timeTo', metavar="TT", help="Get records up till this time")
     p['argsQueryRecords'].add_argument('--type', dest='type', help="Id or name of type. Comma separated")
@@ -417,7 +428,9 @@ class YastCli(object):
 
   def _printObjMap(self, objMap, propSel, sortOn = None):
     # Prepare data
-    if isinstance(objMap, dict):
+    if not objMap and self.args.silent:
+      return
+    elif isinstance(objMap, dict):
       if sortOn != None and self.args.sort:
         objMap = [objMap[k] for k in sorted(objMap)]
       else:
@@ -731,10 +744,10 @@ class YastCli(object):
   # Returns options for record query
   def _optsQueryRecords(self):
     options = {}
-    if self.args.timeFrom != None: options['timeFrom'] = self._resolveTime(self.args.timeFrom)
-    if self.args.timeTo != None: options['timeTo'] = self._resolveTime(self.args.timeTo)
-    if self.args.type != None: options['typeId'] = self._resolveRecordTypes(self.args.type)
-    if self.args.parent != None: options['parentId'] = self._resolveParents(self.args.parent)
+    if 'timeFrom' in self.args: options['timeFrom'] = self._resolveTime(self.args.timeFrom)
+    if 'timeTo' in self.args: options['timeTo'] = self._resolveTime(self.args.timeTo)
+    if 'type' in self.args: options['typeId'] = self._resolveRecordTypes(self.args.type)
+    if 'parent' in self.args: options['parentId'] = self._resolveParents(self.args.parent)
     return options    
         
   # Login comand
@@ -763,38 +776,38 @@ class YastCli(object):
   # add record work command
   def _reqAddRecordWork(self):
     self._login("add record work")
-    self._printRecords(self.yast.add(YastRecordWork(self._resolveProject(self.args.project), 
-                                                    self._resolveTime(self.args.startTime), 
-                                                    self._resolveTime(self.args.endTime), 
-                                                    self._default(self.args.comment, ""),
-                                                    1 if self._default(self.args.isRunning, False) else 0)))
+    self._printRecords(self.yast.add(YastRecordWork(self._resolveProject(self.args.project if 'project' in self.args else 0), 
+                                                    self._resolveTime(self.args.startTime if 'startTime' in self.args else ''), 
+                                                    self._resolveTime(self.args.endTime if 'endTime' in self.args else ''), 
+                                                    self.args.comment if 'comment' in self.args else '',
+                                                    0 if not 'isRunning' in self.args or not self.args.isRunning else 1)))
 
   # add record phonecall command
   def _reqAddRecordPhonecall(self):
     self._login("add record phonecall")
-    self._printRecords(self.yast.add(YastRecordPhonecall(self._resolveProject(self.args.project), 
-                                                         self._resolveTime(self.args.startTime), 
-                                                         self._resolveTime(self.args.endTime), 
-                                                         self._default(self.args.comment, ""),
-                                                         1 if self._default(self.args.isRunning, False) else 0,
-                                                         self._default(self.args.phoneNumber, ""),
-                                                         1 if self._default(self.args.outgoing, False) else 0)))
+    self._printRecords(self.yast.add(YastRecordPhonecall(self._resolveProject(self.args.project if 'project' in self.args else 0), 
+                                                         self._resolveTime(self.args.startTime if 'startTime' in self.args else ''), 
+                                                         self._resolveTime(self.args.endTime if 'endTime' in self.args else ''), 
+                                                         self.args.comment if 'comment' in self.args else '',
+                                                         0 if not 'isRunning' in self.args or not self.args.isRunning else 1,
+                                                         self.args.phoneNumber if 'phoneNumber' in self.args else '',
+                                                         0 if not 'outgoing' in self.args or not self.args.outgoing else 1)))
 
   # add project command
   def _reqAddProject(self):
     self._login("add project")
-    self._printProjects(self.yast.add(YastProject(self.args.name if self.args.name != None else "", 
-                                                  self.args.description if self.args.description != None else "", 
-                                                  self.args.color if self.args.color != None else "blue",
-                                                  self._resolveFolder(self.args.parent))))
+    self._printProjects(self.yast.add(YastProject(self.args.name if 'name' in self.args else "", 
+                                                  self.args.description if 'description' in self.args else "", 
+                                                  self.args.color if 'color' in self.args else "blue",
+                                                  self._resolveFolder(self.args.parent) if 'parent' in self.args else 0)))
 
   # add folder command
   def _reqAddFolder(self):
     self._login("add folder")
-    self._printProjects(self.yast.add(YastFolder(self.args.name if self.args.name != None else "", 
-                                                 self.args.description if self.args.description != None else "", 
-                                                 self.args.color if self.args.color != None else "blue",
-                                                 self._resolveFolder(self.args.parent))))
+    self._printProjects(self.yast.add(YastFolder(self.args.name if 'name' in self.args else "", 
+                                                 self.args.description if 'description' in self.args else "", 
+                                                 self.args.color if 'color' in self.args else "blue",
+                                                 self._resolveFolder(self.args.parent) if 'parent' in self.args else 0)))
 
   # change record command
   def _reqChangeRecord(self, type):
@@ -805,13 +818,13 @@ class YastCli(object):
     rec = next(iter(rec.values()))
     if type != None and not isinstance(rec, type):
       raise Exception("Record is of type '{0}', not of requested type '{1}'".format(rec.typeName, type.typeName))
-    if self.args.project != None: rec.project = self._resolveProject(self.args.project)
-    if self.args.startTime != None: rec.variables['startTime'] = self._resolveTime(self.args.startTime)
-    if self.args.endTime != None: rec.variables['endTime'] = self._resolveTime(self.args.endTime)
-    if self.args.comment != None: rec.variables['comment'] = self.args.comment
-    if self.args.isRunning != None: rec.variables['isRunning'] = 1 if self.args.isRunning else 0
-    if 'phoneNumber' in self.args and self.args.phoneNumber != None: rec.variables['phoneNumber'] = self.args.phoneNumber
-    if 'outgoing' in self.args and self.args.outgoing != None: rec.variables['outgoing'] = 1 if self.args.outgoing else 0
+    if 'project' in self.args: rec.project = self._resolveProject(self.args.project)
+    if 'startTime' in self.args: rec.variables['startTime'] = self._resolveTime(self.args.startTime)
+    if 'endTime' in self.args: rec.variables['endTime'] = self._resolveTime(self.args.endTime)
+    if 'comment' in self.args: rec.variables['comment'] = self.args.comment
+    if 'isRunning' in self.args: rec.variables['isRunning'] = 1 if self.args.isRunning else 0
+    if 'phoneNumber' in self.args: rec.variables['phoneNumber'] = self.args.phoneNumber
+    if 'outgoing' in self.args: rec.variables['outgoing'] = 1 if self.args.outgoing else 0
     self._printRecords(self.yast.change(rec))
 
   # change project command
@@ -823,10 +836,10 @@ class YastCli(object):
     if not id in self.projects:
       raise Exception("Invalid project id: " + str(id))
     proj = self.projects[id]
-    if self.args.name != None: proj.name = self.args.name
-    if self.args.description != None: proj.description = self.args.description
-    if self.args.color != None: proj.primaryColor = self.args.color
-    if self.args.parent != None: proj.parentId = self._resolveFolder(self.args.parent)
+    if 'name' in self.args: proj.name = self.args.name
+    if 'description' in self.args: proj.description = self.args.description
+    if 'color' in self.args: proj.primaryColor = self.args.color
+    if 'parent' in self.args: proj.parentId = self._resolveFolder(self.args.parent)
     self._printProjects(self.yast.change(proj))
 
   # change folder command
@@ -838,10 +851,10 @@ class YastCli(object):
     if not id in self.folders:
       raise Exception("Invalid folder id: " + str(id))
     folder = self.folders[id]
-    if self.args.name != None: folder.name = self.args.name
-    if self.args.description != None: folder.description = self.args.description
-    if self.args.color != None: folder.primaryColor = self.args.color
-    if self.args.parent != None: folder.parentId = self._resolveFolder(self.args.parent)
+    if 'name' in self.args: folder.name = self.args.name
+    if 'description' in self.args: folder.description = self.args.description
+    if 'color' in self.args: folder.primaryColor = self.args.color
+    if 'parent' in self.args: folder.parentId = self._resolveFolder(self.args.parent)
     self._printProjects(self.yast.change(folder))    
 
 

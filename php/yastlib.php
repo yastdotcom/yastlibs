@@ -13,6 +13,10 @@ Yast PHP LIB
 Version:
 0.8 - First release
 
+0.9 - Bugfixes++
+ * Improved error detection in XML parse
+ * Added option for connecting to Yast using HTTPS
+
 */
 
 /** Status messages returned from Yast API. Return-value from last API call can
@@ -250,6 +254,8 @@ class Yast {
   public $dlPath = '/file.php';
   /** Request method. True for GET, false for POST */
   public $requestMethodGet = FALSE;
+  /** Use https instead of http */
+  public $useHttps = FALSE;
   /** Request timeout in seconds */
   public $requestTimeout = 300;
 
@@ -719,7 +725,7 @@ class Yast {
       $fields = $this->getXmlFields($resp);
 
       //Download
-      $file = file_get_contents('http://' . $this->host . $this->dlPath . '?' . 
+      $file = file_get_contents(($this->useHttps ? 'https://' : 'http://') . $this->host . $this->dlPath . '?' . 
 				implode('&', array('type=report',
 						   'id=' . $fields['reportId'],
 						   'hash=' . $fields['reportHash'],
@@ -907,20 +913,20 @@ class Yast {
   private function request($request) {
     if ($this->requestMethodGet) {
       //Request using GET
-      $responseBody = file_get_contents('http://' . $this->host . $this->apiPath . "?request=" . urlencode($request), false,
+      $responseBody = file_get_contents(($this->useHttps ? 'https://' : 'http://') . $this->host . $this->apiPath . "?request=" . urlencode($request), false,
 					stream_context_create(array('http' => array('timeout' => $this->requestTimeout))));
     }
     else {
       //Request using POST
       $data = http_build_query(array('request' => $request));
-      $response = file_get_contents('http://' . $this->host . $this->apiPath, false, 
+      $response = file_get_contents(($this->useHttps ? 'https://' : 'http://') . $this->host . $this->apiPath, false, 
 				    stream_context_create(array('http' => array('method' => 'POST', 
 										'header' => "Content-type: application/x-www-form-urlencoded\r\n" .
 										            "Accept: text/xml\r\n", 
 										'timeout' => $this->requestTimeout,
 										'content' => $data))));
     }
-
+    
     $xmlDoc = new DOMDocument();
     if ($xmlDoc->loadxml(trim($response), LIBXML_NOERROR | LIBXML_NOWARNING) !== TRUE) {
       $this->status = YastStatus::LIB_XML_PARSE_ERROR;
@@ -997,11 +1003,11 @@ class Yast {
    */
   private function getXmlField($xml, $field) {
     $items = $xml->getElementsByTagName($field);
-    if ($items->length == 1 ) {
+    if ($items->length == 1) {
       return $items->item(0)->nodeValue;
     }
     else {
-      return FALSE;
+      throw new Exception("Could not find expected XML tag " . $field);
     }
   }
 
@@ -1017,7 +1023,7 @@ class Yast {
       return $node->nodeValue;
     }
     else {
-      return FALSE;
+      throw new Exception("Could not find expected XML attribure " . $field);
     }
   }
 

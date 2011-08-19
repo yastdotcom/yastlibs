@@ -12,14 +12,17 @@
 # Version:
 # 0.8 - First release
 #
+# 0.9 - Bugfixes
+#  * Added option for connecting to Yast using HTTPS
+#
 
 import os,sys
 if sys.version_info[0] == 3:
   from urllib.parse import urlencode
-  from http.client import HTTPConnection
+  from http.client import HTTPConnection, HTTPSConnection
 else:
   from urllib import urlencode
-  from httplib import HTTPConnection
+  from httplib import HTTPConnection, HTTPSConnection
 from xml.etree import ElementTree
 
 
@@ -250,6 +253,8 @@ class Yast(object):
   dlPath = '/file.php'
   # Request method. True for GET, False for POST 
   requestMethodGet = False
+  # Use https instead of http
+  useHttps = False
   # Request timeout in seconds
   requestTimeout = 300
 
@@ -660,12 +665,16 @@ class Yast(object):
       fields = self._getXmlFields(resp)
 
       # Download
-      conn = HTTPConnection(self.host)
+      if self.useHttps:
+        conn = HTTPSConnection(self.host)
+      else:
+        conn = HTTPConnection(self.host)
+
       conn.request('GET', self.dlPath + "?" + urlencode({'type':     'report',
-                                                                'id':       fields['reportId'],
-                                                                'hash':     fields['reportHash'],
-                                                                'user':     user,
-                                                                'userhash': hash}))
+                                                         'id':       fields['reportId'],
+                                                         'hash':     fields['reportHash'],
+                                                         'user':     user,
+                                                         'userhash': hash}))
       file = conn.getresponse().read()
       conn.close()
       return file
@@ -813,14 +822,17 @@ class Yast(object):
   # @param request full XML request in text format
   # @return Parsed XML object
   def _request(self, request):
-    if self.requestMethodGet:
+    if self.useHttps:
+      conn = HTTPSConnection(self.host, timeout=self.requestTimeout)
+    else:
       conn = HTTPConnection(self.host, timeout=self.requestTimeout)
+
+    if self.requestMethodGet:
       conn.request('GET', self.apiPath + "?" + urlencode({'request': request}))
       response = conn.getresponse().read()
       conn.close()
     else:
       headers = {'Content-type': "application/x-www-form-urlencoded", 'Accept': "text/xml"}
-      conn = HTTPConnection(self.host, timeout=self.requestTimeout)
       conn.request('POST', self.apiPath, urlencode({'request': request}), headers)
       response = conn.getresponse().read()
       conn.close()
