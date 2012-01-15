@@ -17,6 +17,10 @@ Version:
  * Improved error detection in XML parse
  * Added option for connecting to Yast using HTTPS
 
+0.10 - Misc
+ * Corrected YastStatus::XML_PARSE_ERROR -> YastStatus::LIB_XML_PARSE_ERROR
+ * Added support for new work record variables
+
 */
 
 /** Status messages returned from Yast API. Return-value from last API call can
@@ -35,6 +39,7 @@ class YastStatus {
   const MISSING_FIELDS = 11;
   const REQUEST_TOO_LARGE = 12;
   const SERVER_MAINTENANCE = 13;
+  const INVALID_REQUEST_LANGUAGE = 14;
   
   const DUPLICATE_ITEM = 100;
   const INSUFFICIENT_PRIVILEGES = 101;
@@ -51,7 +56,7 @@ class YastStatus {
   const UNKNOWN_GROUPBY_VALUE = 802;
 
   //Reserved for client side
-  const XML_PARSE_ERROR = 40;
+  const LIB_XML_PARSE_ERROR = 40;
   const LIB_NOT_LOGGED_IN = 41;
   const LIB_EXCEPTION = 41;
 
@@ -98,11 +103,15 @@ class YastRecordWork extends YastRecord {
   public $typeName = "work";
 
   /** Construct a work record */
-  public function __construct($project, $startTime, $endTime, $comment, $isRunning) {
+  public function __construct($project, $startTime, $endTime, $comment, $isRunning, $hourlyCost=0,
+			      $hourlyIncome=0, $isBillable=0) {
     parent::__construct(1, (int) $project, array('startTime' => (int) $startTime,
 						 'endTime' => (int) $endTime,
 						 'comment' => $comment,
-						 'isRunning' => (int) $isRunning));
+						 'isRunning' => (int) $isRunning,
+						 'hourlyCost' => (float) $hourlyCost,
+						 'hourlyIncome' => (float) $hourlyIncome,
+						 'isBillable' => (int) $isBillable));
   }
 
   /** Returns XML description of record*/
@@ -113,7 +122,9 @@ class YastRecordWork extends YastRecord {
        '<typeId>1</typeId>' .
        '<project>' . $this->project . '</project>' .
        '<variables><v>' . $this->variables['startTime'] . '</v><v>' . $this->variables['endTime'] . '</v>' .
-       '<v><![CDATA[' . $this->variables['comment'] . ']]></v><v>' . $this->variables['isRunning'] . '</v></variables>' : '') .
+       '<v><![CDATA[' . $this->variables['comment'] . ']]></v><v>' . $this->variables['isRunning'] . '</v>' .
+       '<v>' . $this->variables['hourlyCost'] . '</v><v>' . $this->variables['hourlyIncome'] . '</v>' .
+       '<v>' . $this->variables['isBillable'] . '</v></variables>' : '') .
       '</record>';
   }
 }
@@ -806,7 +817,8 @@ class Yast {
 	  switch ($typeId) {
 	  case 1: //Work record
 	    $record = new YastRecordWork($this->getField('project', $item),
-					 $variables[0], $variables[1], $variables[2], $variables[3]);
+					 $variables[0], $variables[1], $variables[2], $variables[3],
+					 $variables[4], $variables[5], $variables[6]);
 	    break;
 	  case 3: //Phonecall record
 	    $record = new YastRecordPhonecall($this->getField('project', $item),

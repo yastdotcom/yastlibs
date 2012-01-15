@@ -15,6 +15,9 @@
 # 0.9 - Bugfixes
 #  * Added option for connecting to Yast using HTTPS
 #
+# 0.10 - Misc
+#  * Added support for new work record variables
+#
 
 import os,sys
 if sys.version_info[0] == 3:
@@ -42,6 +45,7 @@ class YastStatus:
   MISSING_FIELDS = 11
   REQUEST_TOO_LARGE = 12
   SERVER_MAINTENANCE = 13
+  INVALID_REQUEST_LANGUAGE = 14
   
   DUPLICATE_ITEM = 100
   INSUFFICIENT_PRIVILEGES = 101
@@ -103,11 +107,15 @@ class YastRecordWork(YastRecord):
   typeName = "work"
 
   # Construct a work record
-  def __init__(self, project, startTime, endTime, comment, isRunning):
+  def __init__(self, project, startTime, endTime, comment, isRunning, hourlyCost=0, 
+               hourlyIncome=0, isBillable=0):
     super(YastRecordWork, self).__init__(1, int(project), {'startTime': int(startTime),
                                                            'endTime': int(endTime),
                                                            'comment': comment if comment != None else "",
-                                                           'isRunning': int(isRunning)})
+                                                           'isRunning': int(isRunning),
+                                                           'hourlyCost': float(hourlyCost),
+                                                           'hourlyIncome': float(hourlyIncome),
+                                                           'isBillable': int(isBillable)})
   
 
   # Returns XML description of record
@@ -117,7 +125,9 @@ class YastRecordWork(YastRecord):
         ('<typeId>1</typeId>' + \
            '<project>' + str(self.project) + '</project>' + \
            '<variables><v>' + str(self.variables['startTime']) + '</v><v>' + str(self.variables['endTime']) + '</v>' + \
-           '<v><![CDATA[' + self.variables['comment'] + ']]></v><v>' + str(self.variables['isRunning']) + '</v></variables>' \
+           '<v><![CDATA[' + self.variables['comment'] + ']]></v><v>' + str(self.variables['isRunning']) + '</v>' + \
+           '<v>' + str(self.variables['hourlyCost']) + '</v><v>' + str(self.variables['hourlyIncome']) + '</v>' + \
+           '<v>' + str(self.variables['isBillable']) + '</v></variables>' \
            if includeData else '') + \
            '</record>'
   
@@ -737,7 +747,8 @@ class Yast(object):
 	  # Create record
           if typeId == 1: # Work record
             record = YastRecordWork(item.find('project').text,
-                                    variables[0], variables[1], variables[2], variables[3])
+                                    variables[0], variables[1], variables[2], variables[3],
+                                    variables[4], variables[5], variables[6])
           elif typeId == 3: # Phonecall record
             record = YastRecordPhonecall(item.find('project').text,
 					 variables[0], variables[1], variables[2], variables[3], 

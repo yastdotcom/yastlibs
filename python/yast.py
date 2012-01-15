@@ -18,6 +18,10 @@
 #  * Renamed --phoneNumber to --phone-number
 #  * Added option for connecting to Yast using HTTPS
 #
+# 0.10
+#  * Host parameter can now start with 'http://'
+#  * Added support for new work record variables
+#
 
 import argparse, time, re, datetime, io, sys
 
@@ -51,8 +55,8 @@ class YastCli(object):
     # Setup Yast
     self.yast = self._createYast()
     self.yast.propagateExceptions = True
-    self.yast.host = self.args.host;
-    self.yast.useHttps = self.args.https;
+    self.yast.useHttps = self.args.https
+    self.yast.host = re.match('^(?:http://)?(.+)$', self.args.host, re.IGNORECASE).group(1)
 
     # Execute command
     try:
@@ -156,6 +160,15 @@ class YastCli(object):
     p['argsRecordData'].add_argument('--stopped', dest='isRunning', action='store_false',
                                      help="Record is not running")
 
+    # Arguments for work records [additional]
+    p['argsRecordDataWork'] = argparse.ArgumentParser(add_help=False, argument_default=argparse.SUPPRESS)
+    p['argsRecordDataWork'].add_argument('hourlyCost', nargs='?', help="Hourly cost of work")
+    p['argsRecordDataWork'].add_argument('--hourly-cost', dest='hourlyCost', help="Hourly cost of work")
+    p['argsRecordDataWork'].add_argument('hourlyIncome', nargs='?', help="Hourly income of work")
+    p['argsRecordDataWork'].add_argument('--hourly-income', dest='hourlyIncome', help="Hourly income of work")
+    p['argsRecordDataWork'].add_argument('--billable', dest='isBillable', action='store_true', help="Work is billable")
+    p['argsRecordDataWork'].add_argument('--not-billable', dest='isBillable', action='store_false', help="Work is not billable")
+
     # Arguments for phonecall records [additional]
     p['argsRecordDataPhonecall'] = argparse.ArgumentParser(add_help=False, argument_default=argparse.SUPPRESS)
     p['argsRecordDataPhonecall'].add_argument('phoneNumber', nargs='?', help="Phonenumber for phonecall")
@@ -187,7 +200,7 @@ class YastCli(object):
     p['subAddRecord'] = p['parsAddRecord'].add_subparsers()
 
     # add record work command
-    p['parsAddRecordWork'] = p['subAddRecord'].add_parser('work', parents=[p['argsRecordData']], 
+    p['parsAddRecordWork'] = p['subAddRecord'].add_parser('work', parents=[p['argsRecordData'], p['argsRecordDataWork']], 
                                                           help="Add a Work record")
     p['parsAddRecordWork'].set_defaults(func=self._reqAddRecordWork)
 
@@ -220,7 +233,7 @@ class YastCli(object):
     p['parsChangeRecordAny'].set_defaults(func=lambda: self._reqChangeRecord(None))
 
     # change record work command
-    p['parsChangeRecordWork'] = p['subChangeRecord'].add_parser('work', parents=[p['argsRecordId'], p['argsRecordData']], help="Change work record")
+    p['parsChangeRecordWork'] = p['subChangeRecord'].add_parser('work', parents=[p['argsRecordId'], p['argsRecordData'], p['argsRecordDataWork']], help="Change work record")
     p['parsChangeRecordWork'].set_defaults(func=lambda: self._reqChangeRecord(YastRecordWork))
 
     # change record phonecall command
@@ -463,6 +476,8 @@ class YastCli(object):
       sys.stdout.write("\n")
 
   def _printRecords(self, objMap):
+    work = any([isinstance(o, YastRecordWork) for o in objMap.values()]) \
+        if isinstance(objMap, dict) else isinstance(objMap, YastRecordWork)
     calls = any([isinstance(o, YastRecordPhonecall) for o in objMap.values()]) \
         if isinstance(objMap, dict) else isinstance(objMap, YastRecordPhonecall)
     self._printObjMap(objMap, ["id"] if self.args.only_id else ["id", 
@@ -473,7 +488,10 @@ class YastCli(object):
                                ("comment", lambda self,obj: self._defaultMap(obj.variables, 'comment', "")),
                                ("isRunning", lambda self,obj: obj.variables['isRunning']),
                                ("phoneNumber", lambda self,obj: self._defaultMap(obj.variables, 'phoneNumber', "")) if calls else "",
-                               ("outgoing", lambda self,obj: self._defaultMap(obj.variables, 'outgoing', "")) if calls else ""],
+                               ("outgoing", lambda self,obj: self._defaultMap(obj.variables, 'outgoing', "")) if calls else "",
+                               ("hourlyCost", lambda self,obj: self._defaultMap(obj.variables, 'hourlyCost', "")) if work else "",
+                               ("hourlyIncome", lambda self,obj: self._defaultMap(obj.variables, 'hourlyIncome', "")) if work else "",
+                               ("isBillable", lambda self,obj: self._defaultMap(obj.variables, 'isBillable', "")) if work else ""],
                       "id")
 
   def _printProjects(self, objMap):
@@ -780,7 +798,10 @@ class YastCli(object):
                                                     self._resolveTime(self.args.startTime if 'startTime' in self.args else ''), 
                                                     self._resolveTime(self.args.endTime if 'endTime' in self.args else ''), 
                                                     self.args.comment if 'comment' in self.args else '',
-                                                    0 if not 'isRunning' in self.args or not self.args.isRunning else 1)))
+                                                    0 if not 'isRunning' in self.args or not self.args.isRunning else 1,
+                                                    self.args.hourlyCost if 'hourlyCost' in self.args else -1,
+                                                    self.args.hourlyIncome if 'hourlyIncome' in self.args else -1,
+                                                    0 if not 'isBillable' in self.args or not self.args.isBillable else 1)))
 
   # add record phonecall command
   def _reqAddRecordPhonecall(self):
@@ -825,6 +846,9 @@ class YastCli(object):
     if 'isRunning' in self.args: rec.variables['isRunning'] = 1 if self.args.isRunning else 0
     if 'phoneNumber' in self.args: rec.variables['phoneNumber'] = self.args.phoneNumber
     if 'outgoing' in self.args: rec.variables['outgoing'] = 1 if self.args.outgoing else 0
+    if 'hourlyCost' in self.args: rec.variables['hourlyCost'] = self.args.hourlyCost
+    if 'hourlyIncome' in self.args: rec.variables['hourlyIncome'] = self.args.hourlyIncome
+    if 'isBillable' in self.args: rec.variables['isBillable'] = 1 if self.args.isBillable else 0
     self._printRecords(self.yast.change(rec))
 
   # change project command
